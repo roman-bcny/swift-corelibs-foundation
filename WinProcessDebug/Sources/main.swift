@@ -538,10 +538,10 @@ public class WinProcess: @unchecked Sendable {
         debugLog("Setting isRunning = false")
         isRunning = false
         
-        // Wake up waiting run loop
-        if let cfRunLoop = runLoopToWakeup?.getCFRunLoop() {
+        // Wake up waiting run loop without using CoreFoundation internals.
+        if let runLoopToWakeup = runLoopToWakeup {
             debugLog("Waking up run loop")
-            CFRunLoopWakeUp(cfRunLoop)
+            runLoopToWakeup.perform { }
         }
         
         if let handler = self.terminationHandler {
@@ -705,4 +705,3 @@ if let durationIdx = args.firstIndex(of: "--duration"), durationIdx + 1 < args.c
 print()
 
 runTest()
-

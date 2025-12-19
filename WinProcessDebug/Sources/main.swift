@@ -115,6 +115,10 @@ public class WinProcess: @unchecked Sendable {
     private static let managerThreadRunLoopIsRunningCondition = NSCondition()
     private static var managerThreadRunLoopIsRunning = false
     
+    // Condition for manager thread to wait on (keeps thread alive)
+    private static let managerThreadKeepAliveCondition = NSCondition()
+    private static var managerThreadShouldExit = false
+    
     private static func setup() {
         setupLock.lock()
         defer { setupLock.unlock() }
@@ -127,27 +131,32 @@ public class WinProcess: @unchecked Sendable {
             debugLog("Manager thread started")
             managerThreadRunLoop = RunLoop.current
             
-            // IMPORTANT: To keep a RunLoop alive, we need a persistent source.
-            // The original uses CFRunLoopSource, but CoreFoundation isn't available
-            // for standalone apps on Windows.
-            //
-            // Instead, we use a Port which is a Foundation-native way to keep
-            // a RunLoop alive. A Port added to a RunLoop prevents it from exiting.
-            let keepAlivePort = Port()
-            RunLoop.current.add(keepAlivePort, forMode: .default)
-            
+            // Signal that we're running
             managerThreadRunLoopIsRunningCondition.lock()
             managerThreadRunLoopIsRunning = true
             managerThreadRunLoopIsRunningCondition.broadcast()
             managerThreadRunLoopIsRunningCondition.unlock()
             
-            debugLog("Manager thread run loop starting (with Port)")
+            debugLog("Manager thread running (using condition-based keep-alive)")
             
-            // Run the run loop indefinitely
-            // Using run(mode:before:) in a loop is more reliable across platforms
-            while true {
-                _ = RunLoop.current.run(mode: .default, before: Date.distantFuture)
+            // Instead of using RunLoop.run() which requires platform-specific sources,
+            // we use a simple condition wait loop. This thread's purpose is to:
+            // 1. Host the run loop for process callbacks (in the original)
+            // 2. Stay alive for the lifetime of the application
+            //
+            // For our debug app, we simulate this with a condition that never signals.
+            managerThreadKeepAliveCondition.lock()
+            while !managerThreadShouldExit {
+                // Wait with a timeout so we can periodically check and run any
+                // scheduled work on the run loop
+                _ = managerThreadKeepAliveCondition.wait(until: Date(timeIntervalSinceNow: 0.1))
+                
+                // Run any pending run loop work
+                _ = RunLoop.current.run(mode: .default, before: Date())
             }
+            managerThreadKeepAliveCondition.unlock()
+            
+            debugLog("Manager thread exiting")
         }
         thread.name = "WinProcess.ManagerThread"
         thread.start()

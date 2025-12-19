@@ -128,28 +128,26 @@ public class WinProcess: @unchecked Sendable {
             managerThreadRunLoop = RunLoop.current
             
             // IMPORTANT: To keep a RunLoop alive, we need a persistent source.
-            // The original uses CFRunLoopSource via CFRunLoopAddSource().
-            // A Timer with .greatestFiniteMagnitude doesn't work on Windows because
-            // it may be treated as already expired or invalid.
+            // The original uses CFRunLoopSource, but CoreFoundation isn't available
+            // for standalone apps on Windows.
             //
-            // Instead, we use a CFRunLoopSource directly, similar to the original.
-            // This is what the original Process.swift does to keep the manager
-            // thread's run loop alive.
-            var emptySourceContext = CFRunLoopSourceContext()
-            emptySourceContext.version = 0
-            emptySourceContext.perform = { _ in }  // Empty callback
-            
-            let source = CFRunLoopSourceCreate(kCFAllocatorDefault, 0, &emptySourceContext)
-            CFRunLoopAddSource(CFRunLoopGetCurrent(), source, CFRunLoopMode.defaultMode)
+            // Instead, we use a Port which is a Foundation-native way to keep
+            // a RunLoop alive. A Port added to a RunLoop prevents it from exiting.
+            let keepAlivePort = Port()
+            RunLoop.current.add(keepAlivePort, forMode: .default)
             
             managerThreadRunLoopIsRunningCondition.lock()
             managerThreadRunLoopIsRunning = true
             managerThreadRunLoopIsRunningCondition.broadcast()
             managerThreadRunLoopIsRunningCondition.unlock()
             
-            debugLog("Manager thread run loop starting (with CFRunLoopSource)")
-            RunLoop.current.run()
-            fatalError("Manager run loop exited unexpectedly")
+            debugLog("Manager thread run loop starting (with Port)")
+            
+            // Run the run loop indefinitely
+            // Using run(mode:before:) in a loop is more reliable across platforms
+            while true {
+                _ = RunLoop.current.run(mode: .default, before: Date.distantFuture)
+            }
         }
         thread.name = "WinProcess.ManagerThread"
         thread.start()

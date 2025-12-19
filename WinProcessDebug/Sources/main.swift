@@ -127,16 +127,27 @@ public class WinProcess: @unchecked Sendable {
             debugLog("Manager thread started")
             managerThreadRunLoop = RunLoop.current
             
-            // Add an empty source to keep the run loop alive
-            let timer = Timer(timeInterval: .greatestFiniteMagnitude, repeats: false) { _ in }
-            RunLoop.current.add(timer, forMode: .default)
+            // IMPORTANT: To keep a RunLoop alive, we need a persistent source.
+            // The original uses CFRunLoopSource via CFRunLoopAddSource().
+            // A Timer with .greatestFiniteMagnitude doesn't work on Windows because
+            // it may be treated as already expired or invalid.
+            //
+            // Instead, we use a CFRunLoopSource directly, similar to the original.
+            // This is what the original Process.swift does to keep the manager
+            // thread's run loop alive.
+            var emptySourceContext = CFRunLoopSourceContext()
+            emptySourceContext.version = 0
+            emptySourceContext.perform = { _ in }  // Empty callback
+            
+            let source = CFRunLoopSourceCreate(kCFAllocatorDefault, 0, &emptySourceContext)
+            CFRunLoopAddSource(CFRunLoopGetCurrent(), source, CFRunLoopMode.defaultMode)
             
             managerThreadRunLoopIsRunningCondition.lock()
             managerThreadRunLoopIsRunning = true
             managerThreadRunLoopIsRunningCondition.broadcast()
             managerThreadRunLoopIsRunningCondition.unlock()
             
-            debugLog("Manager thread run loop starting")
+            debugLog("Manager thread run loop starting (with CFRunLoopSource)")
             RunLoop.current.run()
             fatalError("Manager run loop exited unexpectedly")
         }
